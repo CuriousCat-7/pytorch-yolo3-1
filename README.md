@@ -1,4 +1,5 @@
 ### pytorch-yolo2
+in this project, we transform yolo2 to yolo3
 Convert https://pjreddie.com/darknet/yolo/ into pytorch. This repository is trying to achieve the following goals.
 - [x] implement RegionLoss, MaxPoolStride1, Reorg, GolbalAvgPool2d
 - [x] implement route layer
