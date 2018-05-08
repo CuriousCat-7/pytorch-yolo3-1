@@ -4,6 +4,7 @@ import torch.nn.functional as F
 import numpy as np
 from region_loss import RegionLoss
 from cfg import *
+from yolo_layer import YOLOLayer
 #from layers.batchnorm.bn import BN2d
 
 class MaxPoolStride1(nn.Module):
@@ -80,6 +81,7 @@ class Darknet(nn.Module):
         ind = -2
         self.loss = None
         outputs = dict()
+        out_boxes = []
         for block in self.blocks:
             ind = ind + 1
             #if ind > 0:
@@ -87,9 +89,17 @@ class Darknet(nn.Module):
 
             if block['type'] == 'net':
                 continue
-            elif block['type'] == 'convolutional' or block['type'] == 'maxpool' or block['type'] == 'reorg' or block['type'] == 'avgpool' or block['type'] == 'softmax' or block['type'] == 'connected':
+            elif block['type'] == 'convolutional' or block['type']=='upsample'  or block['type'] == 'maxpool' or block['type'] == 'reorg' or block['type'] == 'avgpool' or block['type'] == 'softmax' or block['type'] == 'connected':
                 x = self.models[ind](x)
                 outputs[ind] = x
+            elif block['type'] == 'yolo':
+                if self.training:
+                    pass
+                else:
+                    yolo = self.models[ind]
+                    yolo.stride = outputs[-1].size(-1)
+                    boxes = yolo(x)
+                    out_boxes.append(boxes)
             elif block['type'] == 'route':
                 layers = block['layers'].split(',')
                 layers = [int(i) if int(i) > 0 else int(i)+ind for i in layers]
@@ -139,6 +149,27 @@ class Darknet(nn.Module):
             if block['type'] == 'net':
                 prev_filters = int(block['channels'])
                 continue
+            elif block['type'] == 'upsample':
+                stride = int(block['stride'])
+                model = nn.Upsample(scale_factor=(stride,stride), mode='bilinear')
+                models.append(model)
+                pass
+            elif block['type'] == 'yolo':
+                mask = block['mask'].split(',')
+                anchors = block['anchors'].split(',')
+                classes = block['classes']
+                num = block['num']
+                jitter = block['jitter'] # what the use of jitter
+                ignore_thresh = block['ignore_thresh']
+                truth_thresh = block['truth_thresh']
+                random = block['random']
+                model = YOLOLayer()
+                model.anchor_mask =[int(i) for i in mask]
+                model.anchors = [float[i] for i in anchors]
+                model.num_anchors = int(num)
+                model.num_classes = int(classes)
+                model.stride = None
+                models.append(model)
             elif block['type'] == 'convolutional':
                 conv_id = conv_id + 1
                 batch_normalize = int(block['batch_normalize'])
