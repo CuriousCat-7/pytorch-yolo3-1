@@ -10,7 +10,7 @@ def parse_cfg(cfgfile):
         line = line.rstrip()
         if line == '' or line[0] == '#':
             line = fp.readline()
-            continue        
+            continue
         elif line[0] == '[':
             if block:
                 blocks.append(block)
@@ -125,8 +125,15 @@ def print_cfg(blocks):
             out_widths.append(prev_width)
             out_heights.append(prev_height)
             out_filters.append(prev_filters)
-        elif block['type'] == 'region':
-            print('%5d %-6s' % (ind, 'detection'))
+        elif block['type'] == 'region' or block['type'] == 'yolo':
+            print('%5d %-6s' % (ind, 'detection or yolo'))
+            out_widths.append(prev_width)
+            out_heights.append(prev_height)
+            out_filters.append(prev_filters)
+        elif block['type'] == 'upsample':
+            print('%5d %-6s' % (ind, 'upsample'))
+            prev_width = prev_width * int(block['stride'])
+            prev_height = prev_height * int(block['stride'])
             out_widths.append(prev_width)
             out_heights.append(prev_height)
             out_filters.append(prev_filters)
@@ -154,7 +161,7 @@ def load_conv(buf, start, conv_model):
     num_w = conv_model.weight.numel()
     num_b = conv_model.bias.numel()
     conv_model.bias.data.copy_(torch.from_numpy(buf[start:start+num_b]));   start = start + num_b
-    conv_model.weight.data.copy_(torch.from_numpy(buf[start:start+num_w])); start = start + num_w
+    conv_model.weight.data.view(-1).copy_(torch.from_numpy(buf[start:start+num_w])); start = start + num_w
     return start
 
 def save_conv(fp, conv_model):
@@ -172,7 +179,7 @@ def load_conv_bn(buf, start, conv_model, bn_model):
     bn_model.weight.data.copy_(torch.from_numpy(buf[start:start+num_b]));   start = start + num_b
     bn_model.running_mean.copy_(torch.from_numpy(buf[start:start+num_b]));  start = start + num_b
     bn_model.running_var.copy_(torch.from_numpy(buf[start:start+num_b]));   start = start + num_b
-    conv_model.weight.data.copy_(torch.from_numpy(buf[start:start+num_w])); start = start + num_w 
+    conv_model.weight.data.view(-1).copy_(torch.from_numpy(buf[start:start+num_w])); start = start + num_w
     return start
 
 def save_conv_bn(fp, conv_model, bn_model):
@@ -193,7 +200,7 @@ def load_fc(buf, start, fc_model):
     num_w = fc_model.weight.numel()
     num_b = fc_model.bias.numel()
     fc_model.bias.data.copy_(torch.from_numpy(buf[start:start+num_b]));     start = start + num_b
-    fc_model.weight.data.copy_(torch.from_numpy(buf[start:start+num_w]));   start = start + num_w 
+    fc_model.weight.data.copy_(torch.from_numpy(buf[start:start+num_w]));   start = start + num_w
     return start
 
 def save_fc(fp, fc_model):

@@ -68,7 +68,7 @@ class Darknet(nn.Module):
         self.width = int(self.blocks[0]['width'])
         self.height = int(self.blocks[0]['height'])
 
-        if self.blocks[(len(self.blocks)-1)]['type'] == 'region':
+        if self.blocks[(len(self.blocks)-1)]['type'] == 'yolo':
             self.anchors = self.loss.anchors
             self.num_anchors = self.loss.num_anchors
             self.anchor_step = self.loss.anchor_step
@@ -97,7 +97,7 @@ class Darknet(nn.Module):
                     pass
                 else:
                     yolo = self.models[ind]
-                    yolo.stride = outputs[-1].size(-1)
+                    yolo.stride = outputs[ind-1].size(3)
                     boxes = yolo(x)
                     out_boxes.append(boxes)
             elif block['type'] == 'route':
@@ -134,14 +134,17 @@ class Darknet(nn.Module):
                 continue
             else:
                 print('unknown type %s' % (block['type']))
-        return x
+        if self.training:
+            return x
+        else:
+            return out_boxes
 
     def print_network(self):
         print_cfg(self.blocks)
 
     def create_network(self, blocks):
         models = nn.ModuleList()
-    
+
         prev_filters = 3
         out_filters =[]
         conv_id = 0
@@ -151,8 +154,10 @@ class Darknet(nn.Module):
                 continue
             elif block['type'] == 'upsample':
                 stride = int(block['stride'])
-                model = nn.Upsample(scale_factor=(stride,stride), mode='bilinear')
+                model = nn.Upsample(scale_factor=stride ) # model='bilinear' or defualt model = 'nearest'
                 models.append(model)
+                prev_filters = out_filters[-1]
+                out_filters.append(prev_filters)
                 pass
             elif block['type'] == 'yolo':
                 mask = block['mask'].split(',')
@@ -165,11 +170,14 @@ class Darknet(nn.Module):
                 random = block['random']
                 model = YOLOLayer()
                 model.anchor_mask =[int(i) for i in mask]
-                model.anchors = [float[i] for i in anchors]
+                model.anchors = [float(i) for i in anchors]
                 model.num_anchors = int(num)
                 model.num_classes = int(classes)
+                model.anchor_step = int(len(model.anchors)/model.num_anchors)
                 model.stride = None
                 models.append(model)
+                prev_filters = out_filters[-1]
+                out_filters.append(prev_filters)
             elif block['type'] == 'convolutional':
                 conv_id = conv_id + 1
                 batch_normalize = int(block['batch_normalize'])
@@ -270,7 +278,7 @@ class Darknet(nn.Module):
                 models.append(loss)
             else:
                 print('unknown type %s' % (block['type']))
-    
+
         return models
 
     def load_weights(self, weightfile):
@@ -366,3 +374,13 @@ class Darknet(nn.Module):
             else:
                 print('unknown type %s' % (block['type']))
         fp.close()
+
+if __name__ == "__main__":
+    cfgfile = 'cfg/yolov3.cfg'
+    m = Darknet(cfgfile)
+    m.cuda()
+    a = torch.rand(1,3,416,416).cuda()
+    m.train()
+    print m(a).shape
+    m.eval()
+    print m(a)
