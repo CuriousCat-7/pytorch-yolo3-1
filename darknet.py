@@ -70,6 +70,7 @@ class Upsample(nn.Module):
         ws = stride
         hs = stride
         x = x.view(B, C, H, 1, W, 1).expand(B, C, H, stride, W, stride).contiguous().view(B, C, H*stride, W*stride)
+        return x
 
 # support route shortcut and reorg
 class Darknet(nn.Module):
@@ -168,9 +169,9 @@ class Darknet(nn.Module):
                 continue
             elif block['type'] == 'upsample':
                 stride = int(block['stride'])
-                model = Upsample(scale_factor=stride ) # model='bilinear' or defualt model = 'nearest'
+                model = nn.Upsample(scale_factor=stride, mode='bilinear' ) # mode='bilinear' or defualt mode = 'nearest'
+                #model = Upsample() # model='bilinear' or defualt model = 'nearest'
                 models.append(model)
-                prev_filters = out_filters[-1]
                 out_filters.append(prev_filters)
                 pass
             elif block['type'] == 'yolo':
@@ -297,7 +298,7 @@ class Darknet(nn.Module):
 
     def load_weights(self, weightfile):
         fp = open(weightfile, 'rb')
-        header = np.fromfile(fp, count=4, dtype=np.int32)
+        header = np.fromfile(fp, count=5, dtype=np.int32)
         self.header = torch.from_numpy(header)
         self.seen = self.header[3]
         buf = np.fromfile(fp, dtype = np.float32)
@@ -392,9 +393,10 @@ class Darknet(nn.Module):
 if __name__ == "__main__":
     cfgfile = 'cfg/yolov3.cfg'
     m = Darknet(cfgfile)
-    m.cuda()
-    a = torch.rand(1,3,416,416).cuda()
-    m.train()
-    print m(a).shape
-    m.eval()
-    print m(a)
+    print m
+    #m.cuda()
+    #a = torch.rand(1,3,416,416).cuda()
+    #m.train()
+    #print m(a).shape
+    #m.eval()
+    #print m(a)
