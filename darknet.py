@@ -56,6 +56,20 @@ class EmptyModule(nn.Module):
 
     def forward(self, x):
         return x
+class Upsample(nn.Module):
+    def __init__(self, stride=2):
+        super(Upsample, self).__init__()
+        self.stride = stride
+    def forward(self, x):
+        stride = self.stride
+        assert(x.data.dim() == 4)
+        B = x.data.size(0)
+        C = x.data.size(1)
+        H = x.data.size(2)
+        W = x.data.size(3)
+        ws = stride
+        hs = stride
+        x = x.view(B, C, H, 1, W, 1).expand(B, C, H, stride, W, stride).contiguous().view(B, C, H*stride, W*stride)
 
 # support route shortcut and reorg
 class Darknet(nn.Module):
@@ -154,7 +168,7 @@ class Darknet(nn.Module):
                 continue
             elif block['type'] == 'upsample':
                 stride = int(block['stride'])
-                model = nn.Upsample(scale_factor=stride ) # model='bilinear' or defualt model = 'nearest'
+                model = Upsample(scale_factor=stride ) # model='bilinear' or defualt model = 'nearest'
                 models.append(model)
                 prev_filters = out_filters[-1]
                 out_filters.append(prev_filters)
