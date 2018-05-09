@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from utils import *
 
-def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW, noobject_scale, object_scale, sil_thresh, seen):
+def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW, noobject_scale, object_scale, sil_thresh, seen, anchor_mask):
     nB = target.size(0)
     nA = num_anchors
     nC = num_classes
@@ -76,14 +76,23 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
                 if iou > best_iou:
                     best_iou = iou
                     best_n = n
+                    if n not in anchor_mask: # recover the result as it haven't seen when n in anchor_mask
+                        best_iou =  0.0
+                        best_n = -1
                 elif anchor_step==4 and iou == best_iou and dist < min_dist:
                     best_iou = iou
                     best_n = n
                     min_dist = dist
+                    if n not in anchor_mask:
+                        best_iou =  0.0
+                        best_n = -1
+                        min_dist = 10000
 
             gt_box = [gx, gy, gw, gh]
             pred_box = pred_boxes[b*nAnchors+best_n*nPixels+gj*nW+gi]
 
+            import pdb
+            pdb.set_trace()
             coord_mask[b][best_n][gj][gi] = 1
             cls_mask[b][best_n][gj][gi] = 1
             conf_mask[b][best_n][gj][gi] = object_scale
@@ -114,6 +123,7 @@ class YoloLayer(nn.Module):
         self.thresh = 0.6
         self.stride = 32
         self.seen = 0
+        self.sigmoid = nn.Sigmoid(size_average=False)
 
     def forward(self, output, target=None):
         if self.training:
@@ -149,8 +159,9 @@ class YoloLayer(nn.Module):
             pred_boxes = convert2cpu(pred_boxes.transpose(0,1).contiguous().view(-1,4))
             t2 = time.time()
     
-            nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, th, tconf,tcls = build_targets(pred_boxes, target.data, self.anchors, nA, nC, \
-                                                                   nH, nW, self.noobject_scale, self.object_scale, self.thresh, self.seen)
+            reshaped_anchors = [ anchor/self.stride for anchor in self.anchors]
+            nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, th, tconf,tcls = build_targets(pred_boxes, target.data, reshaped_anchors, nA, nC, \
+                                                                   nH, nW, self.noobject_scale, self.object_scale, self.thresh, self.seen, self.anchor_mask)
             cls_mask = (cls_mask == 1)
             nProposals = int((conf > 0.25).sum().data[0])
     
@@ -168,12 +179,13 @@ class YoloLayer(nn.Module):
     
             t3 = time.time()
     
-            loss_x = self.coord_scale * nn.MSELoss(size_average=False)(x*coord_mask, tx*coord_mask)/2.0
-            loss_y = self.coord_scale * nn.MSELoss(size_average=False)(y*coord_mask, ty*coord_mask)/2.0
-            loss_w = self.coord_scale * nn.MSELoss(size_average=False)(w*coord_mask, tw*coord_mask)/2.0
-            loss_h = self.coord_scale * nn.MSELoss(size_average=False)(h*coord_mask, th*coord_mask)/2.0
-            loss_conf = nn.MSELoss(size_average=False)(conf*conf_mask, tconf*conf_mask)/2.0
-            loss_cls = self.class_scale * nn.CrossEntropyLoss(size_average=False)(cls, tcls)
+            loss_x = self.coord_scale * F.mse_loss(x*coord_mask, tx*coord_mask, size_average=False)/2.0
+            loss_y = self.coord_scale * F.mse_loss(y*coord_mask, ty*coord_mask, size_average=False)/2.0
+            loss_w = self.coord_scale * F.mse_loss(w*coord_mask, tw*coord_mask, size_average=False)/2.0
+            loss_h = self.coord_scale * F.mse_loss(h*coord_mask, th*coord_mask, size_average=False)/2.0
+            loss_conf = F.mse_loss(conf*conf_mask, tconf*conf_mask, size_average=False)/2.0
+            #loss_cls = self.class_scale * nn.CrossEntropyLoss(size_average=False)(cls, tcls) # need to chagne crossentropy to sigmoid
+            loss_cls = self.class_scale * F.binary_cross_entropy(self.sigmoid(cls), tcls)
             loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_cls
             t4 = time.time()
             if False:
