@@ -8,18 +8,20 @@ from utils import *
 
 def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW, noobject_scale, object_scale, sil_thresh, seen, anchor_mask):
     nB = target.size(0)
-    nA = num_anchors
+    anchor_offset = anchor_mask[0]
+    nA = len(anchor_mask) # number of anchors we have seen
+    nAA = num_anchors # number of total anchors
     nC = num_classes
     anchor_step = len(anchors)/num_anchors
     conf_mask  = torch.ones(nB, nA, nH, nW) * noobject_scale
     coord_mask = torch.zeros(nB, nA, nH, nW)
     cls_mask   = torch.zeros(nB, nA, nH, nW)
-    tx         = torch.zeros(nB, nA, nH, nW) 
-    ty         = torch.zeros(nB, nA, nH, nW) 
-    tw         = torch.zeros(nB, nA, nH, nW) 
-    th         = torch.zeros(nB, nA, nH, nW) 
+    tx         = torch.zeros(nB, nA, nH, nW)
+    ty         = torch.zeros(nB, nA, nH, nW)
+    tw         = torch.zeros(nB, nA, nH, nW)
+    th         = torch.zeros(nB, nA, nH, nW)
     tconf      = torch.zeros(nB, nA, nH, nW)
-    tcls       = torch.zeros(nB, nA, nH, nW) 
+    tcls       = torch.zeros(nB, nA, nH, nW)
 
     nAnchors = nA*nH*nW
     nPixels  = nH*nW
@@ -35,7 +37,7 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             gh = target[b][t*5+4]*nH
             cur_gt_boxes = torch.FloatTensor([gx,gy,gw,gh]).repeat(nAnchors,1).t()
             cur_ious = torch.max(cur_ious, bbox_ious(cur_pred_boxes, cur_gt_boxes, x1y1x2y2=False))
-        conf_mask[b][cur_ious>sil_thresh] = 0
+        conf_mask[b].view(-1)[cur_ious>sil_thresh] = 0
     if seen < 12800:
        if anchor_step == 4:
            tx = torch.FloatTensor(anchors).view(nA, anchor_step).index_select(1, torch.LongTensor([2])).view(1,nA,1,1).repeat(nB,1,nH,nW)
@@ -64,7 +66,7 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
             gw = target[b][t*5+3]*nW
             gh = target[b][t*5+4]*nH
             gt_box = [0, 0, gw, gh]
-            for n in xrange(nA):
+            for n in xrange(nAA):
                 aw = anchors[anchor_step*n]
                 ah = anchors[anchor_step*n+1]
                 anchor_box = [0, 0, aw, ah]
@@ -89,10 +91,11 @@ def build_targets(pred_boxes, target, anchors, num_anchors, num_classes, nH, nW,
                         min_dist = 10000
 
             gt_box = [gx, gy, gw, gh]
+            best_n -= anchor_offset
+            if best_n == -4:
+                continue
             pred_box = pred_boxes[b*nAnchors+best_n*nPixels+gj*nW+gi]
 
-            import pdb
-            pdb.set_trace()
             coord_mask[b][best_n][gj][gi] = 1
             cls_mask[b][best_n][gj][gi] = 1
             conf_mask[b][best_n][gj][gi] = object_scale
@@ -123,18 +126,23 @@ class YoloLayer(nn.Module):
         self.thresh = 0.6
         self.stride = 32
         self.seen = 0
-        self.sigmoid = nn.Sigmoid(size_average=False)
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, output, target=None):
         if self.training:
             #output : BxAs*(4+1+num_classes)*H*W
             t0 = time.time()
             nB = output.data.size(0)
-            nA = self.num_anchors
+            nA = len(self.anchor_mask)
+            nAA = self.num_anchors
             nC = self.num_classes
             nH = output.data.size(2)
             nW = output.data.size(3)
-    
+            reshaped_anchors = [ anchor/self.stride for anchor in self.anchors]
+            masked_anchors = []
+            for m in self.anchor_mask:
+                masked_anchors += reshaped_anchors[m*self.anchor_step:(m+1)*self.anchor_step]
+
             output   = output.view(nB, nA, (5+nC), nH, nW)
             x    = F.sigmoid(output.index_select(2, Variable(torch.cuda.LongTensor([0]))).view(nB, nA, nH, nW))
             y    = F.sigmoid(output.index_select(2, Variable(torch.cuda.LongTensor([1]))).view(nB, nA, nH, nW))
@@ -144,48 +152,48 @@ class YoloLayer(nn.Module):
             cls  = output.index_select(2, Variable(torch.linspace(5,5+nC-1,nC).long().cuda()))
             cls  = cls.view(nB*nA, nC, nH*nW).transpose(1,2).contiguous().view(nB*nA*nH*nW, nC)
             t1 = time.time()
-    
+
             pred_boxes = torch.cuda.FloatTensor(4, nB*nA*nH*nW)
             grid_x = torch.linspace(0, nW-1, nW).repeat(nH,1).repeat(nB*nA, 1, 1).view(nB*nA*nH*nW).cuda()
             grid_y = torch.linspace(0, nH-1, nH).repeat(nW,1).t().repeat(nB*nA, 1, 1).view(nB*nA*nH*nW).cuda()
-            anchor_w = torch.Tensor(self.anchors).view(nA, self.anchor_step).index_select(1, torch.LongTensor([0])).cuda()
-            anchor_h = torch.Tensor(self.anchors).view(nA, self.anchor_step).index_select(1, torch.LongTensor([1])).cuda()
+            anchor_w = torch.Tensor(masked_anchors).view(nA, self.anchor_step).index_select(1, torch.LongTensor([0])).cuda()
+            anchor_h = torch.Tensor(masked_anchors).view(nA, self.anchor_step).index_select(1, torch.LongTensor([1])).cuda()
             anchor_w = anchor_w.repeat(nB, 1).repeat(1, 1, nH*nW).view(nB*nA*nH*nW)
             anchor_h = anchor_h.repeat(nB, 1).repeat(1, 1, nH*nW).view(nB*nA*nH*nW)
-            pred_boxes[0] = x.data + grid_x
-            pred_boxes[1] = y.data + grid_y
-            pred_boxes[2] = torch.exp(w.data) * anchor_w
-            pred_boxes[3] = torch.exp(h.data) * anchor_h
+            pred_boxes[0] = x.data.view(-1) + grid_x
+            pred_boxes[1] = y.data.view(-1) + grid_y
+            pred_boxes[2] = torch.exp(w.data).view(-1) * anchor_w
+            pred_boxes[3] = torch.exp(h.data).view(-1) * anchor_h
             pred_boxes = convert2cpu(pred_boxes.transpose(0,1).contiguous().view(-1,4))
             t2 = time.time()
-    
-            reshaped_anchors = [ anchor/self.stride for anchor in self.anchors]
-            nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, th, tconf,tcls = build_targets(pred_boxes, target.data, reshaped_anchors, nA, nC, \
+
+            nGT, nCorrect, coord_mask, conf_mask, cls_mask, tx, ty, tw, th, tconf,tcls = build_targets(pred_boxes, target.data, reshaped_anchors, nAA, nC, \
                                                                    nH, nW, self.noobject_scale, self.object_scale, self.thresh, self.seen, self.anchor_mask)
             cls_mask = (cls_mask == 1)
             nProposals = int((conf > 0.25).sum().data[0])
-    
+
             tx    = Variable(tx.cuda())
             ty    = Variable(ty.cuda())
             tw    = Variable(tw.cuda())
             th    = Variable(th.cuda())
             tconf = Variable(tconf.cuda())
-            tcls  = Variable(tcls.view(-1)[cls_mask].long().cuda())
-    
+            tcls  = Variable(tcls[cls_mask].long().cuda())
+
             coord_mask = Variable(coord_mask.cuda())
             conf_mask  = Variable(conf_mask.cuda().sqrt())
             cls_mask   = Variable(cls_mask.view(-1, 1).repeat(1,nC).cuda())
-            cls        = cls[cls_mask].view(-1, nC)  
-    
+            cls        = cls[cls_mask].view(-1, nC)
+
             t3 = time.time()
-    
+
             loss_x = self.coord_scale * F.mse_loss(x*coord_mask, tx*coord_mask, size_average=False)/2.0
             loss_y = self.coord_scale * F.mse_loss(y*coord_mask, ty*coord_mask, size_average=False)/2.0
             loss_w = self.coord_scale * F.mse_loss(w*coord_mask, tw*coord_mask, size_average=False)/2.0
             loss_h = self.coord_scale * F.mse_loss(h*coord_mask, th*coord_mask, size_average=False)/2.0
             loss_conf = F.mse_loss(conf*conf_mask, tconf*conf_mask, size_average=False)/2.0
             #loss_cls = self.class_scale * nn.CrossEntropyLoss(size_average=False)(cls, tcls) # need to chagne crossentropy to sigmoid
-            loss_cls = self.class_scale * F.binary_cross_entropy(self.sigmoid(cls), tcls)
+            tcls = torch.cuda.FloatTensor(tcls.size(0), 80).zero_().scatter_(1, tcls.unsqueeze(-1),  1)
+            loss_cls = self.class_scale * F.binary_cross_entropy( self.sigmoid(cls), tcls,size_average=False)
             loss = loss_x + loss_y + loss_w + loss_h + loss_conf + loss_cls
             t4 = time.time()
             if False:

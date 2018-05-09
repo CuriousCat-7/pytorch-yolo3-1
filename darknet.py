@@ -94,7 +94,7 @@ class Darknet(nn.Module):
         self.header = torch.IntTensor([0,0,0,0])
         self.seen = 0
 
-    def forward(self, x):
+    def forward(self, x, target=None):
         ind = -2
         self.loss = None
         outputs = dict()
@@ -142,7 +142,7 @@ class Darknet(nn.Module):
                 outputs[ind] = None
             elif block['type'] == 'yolo':
                 if self.training:
-                    loss += self.models[ind](x)
+                    loss += self.models[ind](x, target)
                 else:
                     boxes = self.models[ind](x)
                     out_boxes.append(boxes)
@@ -160,7 +160,7 @@ class Darknet(nn.Module):
 
     def create_network(self, blocks):
         models = nn.ModuleList()
-    
+
         prev_filters = 3
         out_filters =[]
         prev_stride = 1
@@ -309,7 +309,7 @@ class Darknet(nn.Module):
                 models.append(yolo_layer)
             else:
                 print('unknown type %s' % (block['type']))
-    
+
         return models
 
     def load_weights(self, weightfile):
@@ -413,3 +413,32 @@ class Darknet(nn.Module):
             else:
                 print('unknown type %s' % (block['type']))
         fp.close()
+
+if __name__ == "__main__":
+    import pdb
+    cfgfile = "cfg/yolov3.cfg"
+    m = Darknet(cfgfile).cuda()
+    from utils import *
+    from torchvision import datasets, transforms
+    import dataset
+    use_cuda=True
+    batch_size = 2
+    kwargs = {'num_workers':1, 'pin_memory': True} if use_cuda else {}
+    data_options = read_data_cfg('cfg/voc.data')
+    trainlist = data_options['train']
+    train_loader = torch.utils.data.DataLoader(
+        dataset.listDataset(trainlist, shape=(416,416),
+                       shuffle=True,
+                       transform=transforms.Compose([
+                           transforms.ToTensor(),
+                       ]),
+                       train=True,
+                       seen=m.seen,
+                       batch_size=batch_size,
+                       num_workers=1),
+        batch_size=batch_size, shuffle=False, **kwargs)
+
+    batch_idx, (data, target)  = enumerate(train_loader).next()
+    a = data.cuda()
+    b = m(a, target)
+    b.backward()
