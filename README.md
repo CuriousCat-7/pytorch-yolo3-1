@@ -1,10 +1,13 @@
 ### Difference
 This project add backward compared to the original project published by [marvis](https://github.com/marvis/pytorch-yolo3).
+
 Another project, which update pytorch-yolo2 to pytorch-yolo3 can be found in branch **from2**
+
 Things have done:
 - Finished the yolo loss
 - Debuged the backward
 - Changed the code to support Pytorch 0.4
+
 Todo:
 - replicate the yolov3 results in [https://pjreddie.com/darknet/yolo/ ](https://pjreddie.com/darknet/yolo)
 
