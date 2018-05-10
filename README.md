@@ -1,3 +1,8 @@
+### Difference
+This project is merely an execrise.
+In this projcet I use pytorch-yolo2 source code from marvis, and update it to yolo3.
+I will drop this project for now, and the new features will be pushed to the master branch.
+
 ### pytorch-yolo2
 in this project, we transform yolo2 to yolo3
 Convert https://pjreddie.com/darknet/yolo/ into pytorch. This repository is trying to achieve the following goals.

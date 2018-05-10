@@ -57,6 +57,8 @@ eps           = 1e-5
 save_interval = 10  # epoches
 dot_interval  = 70  # batches
 
+import pdb
+pdb.set_trace()
 # Test parameters
 conf_thresh   = 0.25
 nms_thresh    = 0.4
@@ -64,7 +66,7 @@ iou_thresh    = 0.5
 
 if not os.path.exists(backupdir):
     os.mkdir(backupdir)
-    
+
 ###############
 torch.manual_seed(seed)
 if use_cuda:
@@ -82,7 +84,7 @@ processed_batches = model.seen/batch_size
 
 init_width        = model.width
 init_height       = model.height
-init_epoch        = model.seen/nsamples 
+init_epoch        = model.seen/nsamples
 
 kwargs = {'num_workers': num_workers, 'pin_memory': True} if use_cuda else {}
 test_loader = torch.utils.data.DataLoader(
@@ -135,8 +137,8 @@ def train(epoch):
                        shuffle=True,
                        transform=transforms.Compose([
                            transforms.ToTensor(),
-                       ]), 
-                       train=True, 
+                       ]),
+                       train=True,
                        seen=cur_model.seen,
                        batch_size=batch_size,
                        num_workers=num_workers),
@@ -229,9 +231,9 @@ def test(epoch):
             boxes = nms(boxes, nms_thresh)
             truths = target[i].view(-1, 5)
             num_gts = truths_length(truths)
-     
+
             total = total + num_gts
-    
+
             for i in range(len(boxes)):
                 if boxes[i][4] > conf_thresh:
                     proposals = proposals+1
@@ -258,6 +260,6 @@ if evaluate:
     logging('evaluating ...')
     test(0)
 else:
-    for epoch in range(init_epoch, max_epochs): 
+    for epoch in range(init_epoch, max_epochs):
         train(epoch)
         test(epoch)
